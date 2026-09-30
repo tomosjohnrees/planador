@@ -4,6 +4,7 @@ struct FocusView: View {
     @EnvironmentObject private var store: AppStore
 
     private var availableTasks: [PlanTask] { store.todayTasks + store.backlogTasks }
+    private var phase: FocusPhase { store.data.clock.phase }
     private var task: PlanTask? {
         guard let selected = store.selectedTask, selected.completedAt == nil else { return nil }
         return selected
@@ -14,12 +15,14 @@ struct FocusView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(title: "Focus", date: store.now)
 
-                if availableTasks.isEmpty {
+                if availableTasks.isEmpty && phase != .breakTime {
                     emptyState
                 } else {
-                    taskPicker
+                    if !availableTasks.isEmpty { taskPicker }
+                    if phase == .breakTime || task != nil {
+                        timer
+                    }
                     if let task {
-                        timer(for: task)
                         notes(for: task)
                     }
                 }
@@ -34,9 +37,10 @@ struct FocusView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Nothing to focus on yet")
+            Text(phase == .ready ? "Break complete" : "Nothing to focus on yet")
                 .font(.system(size: 19, design: .serif))
-            Text("Add a task in Plan to start a focus session.")
+            Text(phase == .ready ? "Add a task in Plan, then start your next session." :
+                    "Add a task in Plan to start a focus session.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.muted)
         }
@@ -65,7 +69,7 @@ struct FocusView: View {
         }
     }
 
-    private func timer(for task: PlanTask) -> some View {
+    private var timer: some View {
         let remaining = store.data.clock.remaining(at: store.now)
         let progress = 1 - remaining / Double(store.data.clock.durationMinutes * 60)
 
@@ -81,7 +85,8 @@ struct FocusView: View {
                     Text(clockText(remaining))
                         .font(.system(size: 65, weight: .light, design: .serif))
                         .monospacedDigit()
-                    Text("Focus time")
+                    Text(phase == .breakTime ? "Break time" :
+                            (phase == .ready ? "Next focus session" : "Focus time"))
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.muted)
                 }
@@ -89,27 +94,44 @@ struct FocusView: View {
             .frame(width: 265, height: 265)
             .padding(.top, 28)
 
-            HStack(spacing: 42) {
-                RoundAction(symbol: "arrow.counterclockwise", label: "Reset timer") {
-                    store.resetFocus()
+            if phase == .ready {
+                Text("Break complete. Start when you're ready.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
+                Button("Start next session") { store.startTimer() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.green)
+                    .disabled(task == nil)
+                    .padding(.bottom, 24)
+            } else {
+                HStack(spacing: 42) {
+                    RoundAction(symbol: "arrow.counterclockwise", label: "Reset timer") {
+                        store.resetTimer()
+                    }
+                    Button {
+                        if store.data.clock.startedAt == nil { store.startTimer() }
+                        else { store.pauseTimer() }
+                    } label: {
+                        Image(systemName: store.data.clock.startedAt == nil ? "play.fill" : "pause.fill")
+                            .font(.system(size: 21))
+                            .foregroundStyle(.white)
+                            .frame(width: 60, height: 60)
+                            .background(Theme.green, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(store.data.clock.startedAt == nil ?
+                        (phase == .breakTime ? "Resume break" : "Start focus") :
+                        (phase == .breakTime ? "Pause break" : "Pause focus"))
+                    if let task {
+                        RoundAction(symbol: "checkmark", label: "Complete task") {
+                            store.complete(task.id)
+                        }
+                    } else {
+                        Color.clear.frame(width: 46, height: 46)
+                    }
                 }
-                Button {
-                    if store.data.clock.startedAt == nil { store.startFocus() }
-                    else { store.pauseFocus() }
-                } label: {
-                    Image(systemName: store.data.clock.startedAt == nil ? "play.fill" : "pause.fill")
-                        .font(.system(size: 21))
-                        .foregroundStyle(.white)
-                        .frame(width: 60, height: 60)
-                        .background(Theme.green, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(store.data.clock.startedAt == nil ? "Start focus" : "Pause focus")
-                RoundAction(symbol: "checkmark", label: "Complete task") {
-                    store.complete(task.id)
-                }
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 24)
         }
         .frame(maxWidth: .infinity)
     }

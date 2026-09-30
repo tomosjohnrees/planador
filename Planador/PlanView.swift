@@ -22,15 +22,14 @@ struct PlanView: View {
             .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $showingAdd) {
-            TaskEditor(task: nil, toToday: addingToToday) { title, minutes, notes in
-                store.addTask(title: title, estimatedMinutes: minutes, notes: notes, toToday: addingToToday)
+            TaskEditor(task: nil, toToday: addingToToday) { title, notes in
+                store.addTask(title: title, notes: notes, toToday: addingToToday)
             }
         }
         .sheet(item: $editingTask) { task in
-            TaskEditor(task: task, toToday: task.plannedDate != nil) { title, minutes, notes in
+            TaskEditor(task: task, toToday: task.plannedDate != nil) { title, notes in
                 var changed = task
                 changed.title = title
-                changed.estimatedMinutes = minutes
                 changed.notes = notes
                 store.updateTask(changed)
             }
@@ -91,9 +90,6 @@ struct PlanView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Text(DurationLabel.short(task.estimatedMinutes))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
             }
             .frame(height: 46)
             .contextMenu {
@@ -118,16 +114,14 @@ struct PlanView: View {
 struct TaskEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
-    @State private var minutes: Int
     @State private var notes: String
     @FocusState private var titleFocused: Bool
     let isEditing: Bool
     let toToday: Bool
-    let save: (String, Int, String) -> Void
+    let save: (String, String) -> Void
 
-    init(task: PlanTask?, toToday: Bool, save: @escaping (String, Int, String) -> Void) {
+    init(task: PlanTask?, toToday: Bool, save: @escaping (String, String) -> Void) {
         _title = State(initialValue: task?.title ?? "")
-        _minutes = State(initialValue: task?.estimatedMinutes ?? 25)
         _notes = State(initialValue: task?.notes ?? "")
         isEditing = task != nil
         self.toToday = toToday
@@ -142,14 +136,6 @@ struct TaskEditor: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($titleFocused)
                 .onSubmit(submit)
-            HStack {
-                Text("Estimate")
-                Spacer()
-                Stepper(value: $minutes, in: 5...480, step: 5) {
-                    Text(DurationLabel.short(minutes)).monospacedDigit()
-                }
-                .fixedSize()
-            }
             Text("Notes").font(.system(size: 13)).foregroundStyle(Theme.muted)
             TextEditor(text: $notes)
                 .font(.system(size: 13))
@@ -170,13 +156,13 @@ struct TaskEditor: View {
 
     private func submit() {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        save(title.trimmingCharacters(in: .whitespacesAndNewlines), minutes, notes)
+        save(title.trimmingCharacters(in: .whitespacesAndNewlines), notes)
         dismiss()
     }
 }
 
 enum DurationLabel {
-    static func short(_ minutes: Int) -> String {
+    private static func short(_ minutes: Int) -> String {
         let hours = minutes / 60
         let remainder = minutes % 60
         if hours == 0 { return "\(remainder)m" }

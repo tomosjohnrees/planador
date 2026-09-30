@@ -9,7 +9,7 @@ final class AppStoreTests: XCTestCase {
         let file = directory.appendingPathComponent("data.json")
         let store = AppStore(fileURL: file)
 
-        store.addTask(title: "  Fix the build  ", estimatedMinutes: 45, notes: "Check CI", toToday: false)
+        store.addTask(title: "  Fix the build  ", notes: "Check CI", toToday: false)
         let task = try XCTUnwrap(store.backlogTasks.first)
         XCTAssertEqual(task.title, "Fix the build")
         XCTAssertEqual(task.notes, "Check CI")
@@ -33,9 +33,9 @@ final class AppStoreTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString).appendingPathComponent("data.json")
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
         let store = AppStore(fileURL: file)
-        store.addTask(title: "First", estimatedMinutes: 25, notes: "", toToday: true)
-        store.addTask(title: "Second", estimatedMinutes: 25, notes: "", toToday: true)
-        store.addTask(title: "Backlog", estimatedMinutes: 25, notes: "", toToday: false)
+        store.addTask(title: "First", notes: "", toToday: true)
+        store.addTask(title: "Second", notes: "", toToday: true)
+        store.addTask(title: "Backlog", notes: "", toToday: false)
         let second = try XCTUnwrap(store.todayTasks.last)
 
         store.moveWithinList(second.id, by: -1)
@@ -50,5 +50,63 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(clock.remaining(at: start.addingTimeInterval(30)), 1410)
         XCTAssertEqual(clock.remaining(at: start.addingTimeInterval(1800)), 0)
         XCTAssertEqual(clock.elapsed(at: start.addingTimeInterval(1800)), 1500)
+    }
+
+    @MainActor
+    func testWorkAutomaticallyStartsBreakThenWaitsForNextSession() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let task = PlanTask(title: "Implement feature", plannedDate: Date(), sortOrder: 0)
+        let start = Date().addingTimeInterval(30)
+        let saved = AppData(tasks: [task], clock: FocusClock(taskID: task.id, durationMinutes: 1,
+                                                             startedAt: start),
+                            timerSettings: TimerSettings(workMinutes: 1, breakMinutes: 1))
+        try JSONEncoder().encode(saved).write(to: file)
+        var soundCount = 0
+        let store = AppStore(fileURL: file, completionSound: { soundCount += 1 })
+
+        store.updateClock(at: start.addingTimeInterval(60), announce: true)
+        XCTAssertEqual(store.data.clock.phase, .breakTime)
+        XCTAssertEqual(store.data.clock.startedAt, start.addingTimeInterval(60))
+        XCTAssertEqual(store.data.sessions.count, 1)
+        XCTAssertEqual(store.data.sessions[0].duration, 60, accuracy: 0.001)
+        XCTAssertEqual(soundCount, 1)
+
+        store.updateClock(at: start.addingTimeInterval(120), announce: true)
+        XCTAssertEqual(store.data.clock.phase, .ready)
+        XCTAssertNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.sessions.count, 1)
+        XCTAssertEqual(soundCount, 2)
+
+        store.startTimer()
+        XCTAssertEqual(store.data.clock.phase, .work)
+        XCTAssertNotNil(store.data.clock.startedAt)
+    }
+
+    @MainActor
+    func testLegacyDataKeepsTasksAndFocusLength() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let task = PlanTask(title: "Existing task", sortOrder: 0)
+        let current = AppData(tasks: [task], clock: FocusClock(durationMinutes: 45))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(current)) as? [String: Any])
+        json.removeValue(forKey: "timerSettings")
+        var oldClock = try XCTUnwrap(json["clock"] as? [String: Any])
+        oldClock.removeValue(forKey: "phase")
+        json["clock"] = oldClock
+        var oldTasks = try XCTUnwrap(json["tasks"] as? [[String: Any]])
+        oldTasks[0]["estimatedMinutes"] = 90
+        json["tasks"] = oldTasks
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+
+        let store = AppStore(fileURL: file)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertEqual(store.backlogTasks.map(\.title), ["Existing task"])
+        XCTAssertEqual(store.data.timerSettings.workMinutes, 45)
+        XCTAssertEqual(store.data.timerSettings.breakMinutes, 5)
     }
 }

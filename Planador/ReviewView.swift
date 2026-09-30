@@ -86,9 +86,6 @@ struct ReviewView: View {
                     .font(.system(size: 14))
                     .lineLimit(1)
                 Spacer()
-                Text(DurationLabel.short(task.estimatedMinutes))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.muted)
             }
             .frame(height: 46)
             Hairline()
@@ -114,4 +111,3 @@ struct ReviewView: View {
         }
     }
 }
-

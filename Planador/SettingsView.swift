@@ -12,18 +12,31 @@ struct SettingsView: View {
                 Spacer()
                 Button("Done") { dismiss() }
             }
-            Text("Focus session length")
-                .font(.system(size: 14, weight: .medium))
-            Picker("Focus session length", selection: Binding(
-                get: { store.data.clock.durationMinutes },
-                set: { store.setFocusDuration($0) }
-            )) {
-                ForEach([15, 25, 45, 60], id: \.self) { value in
-                    Text("\(value) minutes").tag(value)
+            Stepper(value: Binding(
+                get: { store.data.timerSettings.workMinutes },
+                set: { store.setWorkMinutes($0) }
+            ), in: 5...120, step: 5) {
+                HStack {
+                    Text("Focus session")
+                    Spacer()
+                    Text("\(store.data.timerSettings.workMinutes) min")
+                        .foregroundStyle(Theme.muted)
+                        .monospacedDigit()
                 }
             }
-            .labelsHidden()
-            Text("Changing the length resets the current timer. Time already focused stays in your daily total.")
+            Stepper(value: Binding(
+                get: { store.data.timerSettings.breakMinutes },
+                set: { store.setBreakMinutes($0) }
+            ), in: 1...30) {
+                HStack {
+                    Text("Break")
+                    Spacer()
+                    Text("\(store.data.timerSettings.breakMinutes) min")
+                        .foregroundStyle(Theme.muted)
+                        .monospacedDigit()
+                }
+            }
+            Text("Changes apply to the next focus session or break. A sound plays when each timer ends.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
             Spacer()
@@ -32,6 +45,6 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.muted)
         }
         .padding(28)
-        .frame(width: 420, height: 260)
+        .frame(width: 440, height: 280)
     }
 }

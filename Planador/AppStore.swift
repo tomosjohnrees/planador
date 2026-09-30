@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -7,14 +8,16 @@ final class AppStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let fileURL: URL
+    private let completionSound: () -> Void
     private var maySave = true
     nonisolated(unsafe) private var ticker: Timer?
     private let calendar = Calendar.current
 
-    init(fileURL: URL? = nil) {
+    init(fileURL: URL? = nil, completionSound: @escaping () -> Void = { NSSound.beep() }) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Planador", isDirectory: true)
         self.fileURL = fileURL ?? support.appendingPathComponent("data.json")
+        self.completionSound = completionSound
         do {
             let bytes = try Data(contentsOf: self.fileURL)
             data = try JSONDecoder().decode(AppData.self, from: bytes)
@@ -36,7 +39,7 @@ final class AppStore: ObservableObject {
             Task { @MainActor [weak self] in self?.tick() }
         }
         ticker?.tolerance = 0.1
-        tick()
+        updateClock(at: Date(), announce: false)
     }
 
     deinit { ticker?.invalidate() }
@@ -68,18 +71,19 @@ final class AppStore: ObservableObject {
             let overlapEnd = min(session.endedAt, interval.end)
             return sum + max(0, overlapEnd.timeIntervalSince(overlapStart))
         }
-        if let started = data.clock.startedAt {
-            return saved + max(0, min(now, interval.end).timeIntervalSince(max(started, interval.start)))
+        if data.clock.phase == .work, let started = data.clock.startedAt {
+            let workEnd = started.addingTimeInterval(data.clock.remaining(at: started))
+            return saved + max(0, min(now, interval.end, workEnd).timeIntervalSince(max(started, interval.start)))
         }
         return saved
     }
 
-    func addTask(title: String, estimatedMinutes: Int, notes: String, toToday: Bool) {
+    func addTask(title: String, notes: String, toToday: Bool) {
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else { return }
         let order = (data.tasks.map(\.sortOrder).max() ?? -1) + 1
-        data.tasks.append(PlanTask(title: cleanTitle, estimatedMinutes: estimatedMinutes,
-                                   notes: notes, plannedDate: toToday ? today : nil, sortOrder: order))
+        data.tasks.append(PlanTask(title: cleanTitle, notes: notes,
+                                   plannedDate: toToday ? today : nil, sortOrder: order))
         save()
     }
 
@@ -97,7 +101,13 @@ final class AppStore: ObservableObject {
 
     func complete(_ id: UUID) {
         guard let index = data.tasks.firstIndex(where: { $0.id == id }) else { return }
-        if data.clock.taskID == id { pauseFocus() }
+        if data.clock.taskID == id {
+            if data.clock.phase == .work {
+                pauseTimer()
+                data.clock.elapsedBeforeRun = 0
+            }
+            data.clock.taskID = nil
+        }
         data.tasks[index].completedAt = now
         save()
     }
@@ -133,7 +143,13 @@ final class AppStore: ObservableObject {
     }
 
     func delete(_ id: UUID) {
-        if data.clock.taskID == id { pauseFocus(); data.clock = FocusClock() }
+        if data.clock.taskID == id {
+            if data.clock.phase == .work {
+                pauseTimer()
+                data.clock.elapsedBeforeRun = 0
+            }
+            data.clock.taskID = nil
+        }
         data.tasks.removeAll { $0.id == id }
         save()
     }
@@ -141,48 +157,101 @@ final class AppStore: ObservableObject {
     func selectForFocus(_ id: UUID) {
         guard data.tasks.contains(where: { $0.id == id && $0.completedAt == nil }) else { return }
         guard data.clock.taskID != id else { return }
-        pauseFocus()
-        data.clock = FocusClock(taskID: id, durationMinutes: data.clock.durationMinutes)
+        if data.clock.phase == .work {
+            pauseTimer()
+            data.clock = FocusClock(taskID: id, durationMinutes: data.timerSettings.workMinutes)
+        } else {
+            data.clock.taskID = id
+        }
         save()
     }
 
-    func setFocusDuration(_ minutes: Int) {
-        guard [15, 25, 45, 60].contains(minutes) else { return }
-        pauseFocus()
-        data.clock.durationMinutes = minutes
-        data.clock.elapsedBeforeRun = 0
+    func setWorkMinutes(_ minutes: Int) {
+        guard (5...120).contains(minutes) else { return }
+        data.timerSettings.workMinutes = minutes
+        if data.clock.phase == .ready ||
+            (data.clock.phase == .work && data.clock.startedAt == nil && data.clock.elapsedBeforeRun == 0) {
+            data.clock.durationMinutes = minutes
+        }
         save()
     }
 
-    func startFocus() {
-        guard selectedTask?.completedAt == nil, data.clock.startedAt == nil else { return }
-        if data.clock.remaining(at: now) == 0 { data.clock.elapsedBeforeRun = 0 }
-        data.clock.startedAt = Date()
+    func setBreakMinutes(_ minutes: Int) {
+        guard (1...30).contains(minutes) else { return }
+        data.timerSettings.breakMinutes = minutes
+        save()
+    }
+
+    func startTimer() {
+        guard data.clock.startedAt == nil else { return }
+        if data.clock.phase == .ready {
+            guard selectedTask?.completedAt == nil else { return }
+            data.clock.phase = .work
+            data.clock.durationMinutes = data.timerSettings.workMinutes
+            data.clock.elapsedBeforeRun = 0
+        } else if data.clock.phase == .work {
+            guard selectedTask?.completedAt == nil else { return }
+        }
         now = Date()
+        data.clock.startedAt = now
         save()
     }
 
-    func pauseFocus() {
-        guard let started = data.clock.startedAt, let taskID = data.clock.taskID else { return }
-        let end = min(Date(), started.addingTimeInterval(data.clock.remaining(at: started)))
+    func pauseTimer() {
+        let date = Date()
+        let previousPhase = data.clock.phase
+        updateClock(at: date, announce: true)
+        guard previousPhase == data.clock.phase, let started = data.clock.startedAt else { return }
+        let end = min(date, started.addingTimeInterval(data.clock.remaining(at: started)))
         if end > started {
-            data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
+            if data.clock.phase == .work, let taskID = data.clock.taskID {
+                data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
+            }
             data.clock.elapsedBeforeRun += end.timeIntervalSince(started)
         }
         data.clock.startedAt = nil
-        now = Date()
+        now = date
         save()
     }
 
-    func resetFocus() {
-        pauseFocus()
+    func resetTimer() {
+        pauseTimer()
         data.clock.elapsedBeforeRun = 0
         save()
     }
 
     private func tick() {
-        now = Date()
-        if data.clock.startedAt != nil && data.clock.remaining(at: now) <= 0 { pauseFocus() }
+        updateClock(at: Date(), announce: true)
+    }
+
+    func updateClock(at date: Date, announce: Bool = false) {
+        now = date
+        var changed = false
+        for _ in 0..<2 {
+            guard let started = data.clock.startedAt,
+                  data.clock.remaining(at: date) <= 0 else { break }
+            let end = started.addingTimeInterval(data.clock.remaining(at: started))
+            switch data.clock.phase {
+            case .work:
+                if let taskID = data.clock.taskID, end > started {
+                    data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
+                }
+                data.clock.phase = .breakTime
+                data.clock.durationMinutes = data.timerSettings.breakMinutes
+                data.clock.elapsedBeforeRun = 0
+                data.clock.startedAt = end
+            case .breakTime:
+                data.clock.phase = .ready
+                data.clock.durationMinutes = data.timerSettings.workMinutes
+                data.clock.elapsedBeforeRun = 0
+                data.clock.startedAt = nil
+            case .ready:
+                data.clock.startedAt = nil
+            }
+            if announce && date.timeIntervalSince(end) < 2 { completionSound() }
+            changed = true
+        }
+        if changed { save() }
     }
 
     private func save() {
