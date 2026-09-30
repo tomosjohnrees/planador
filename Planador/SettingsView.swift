@@ -24,6 +24,7 @@ struct SettingsView: View {
                         .monospacedDigit()
                 }
             }
+            .accessibilityLabel("Focus session length")
             Stepper(value: Binding(
                 get: { store.data.timerSettings.breakMinutes },
                 set: { store.setBreakMinutes($0) }
@@ -36,15 +37,17 @@ struct SettingsView: View {
                         .monospacedDigit()
                 }
             }
-            Text("Changes apply to the next focus session or break. A sound plays when each timer ends.")
+            .accessibilityLabel("Break length")
+            Text("Changes apply to the next timer.\nA sound plays when each timer ends.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Text("Planador saves tasks and focus time on this Mac.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
         }
         .padding(28)
-        .frame(width: 440, height: 280)
+        .frame(width: 440, height: 310)
     }
 }

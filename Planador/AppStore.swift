@@ -39,6 +39,7 @@ final class AppStore: ObservableObject {
             Task { @MainActor [weak self] in self?.tick() }
         }
         ticker?.tolerance = 0.1
+        if let ticker { RunLoop.main.add(ticker, forMode: .common) }
         updateClock(at: Date(), announce: false)
     }
 

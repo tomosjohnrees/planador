@@ -33,8 +33,10 @@ Tasks, notes, timer state, and focus sessions are saved as JSON at `~/Library/Ap
 
 ## Workflow
 
-- **Plan:** Add and edit tasks, set estimates, move tasks between Today and Backlog, and reorder them from a task's context menu.
-- **Focus:** Pick one task, start or pause a configurable focus timer, reset it, complete the task, and keep notes. Paused and completed intervals count toward the daily total.
+- **Plan:** Add and edit tasks, move them between Today and Backlog, and reorder them from a task's context menu.
+- **Focus:** Pick one task and start a focus session. A sound plays at the end, then the break starts automatically. A second sound marks the end of the break; the next focus session waits for you to click Start. You can pause or reset the current timer and keep task notes. Only focus time counts toward the daily total.
 - **Review:** See today's completions, unfinished tasks, and focused time. Send unfinished tasks to tomorrow or back to the backlog.
+
+Set the default focus and break lengths in **Settings**. Changes take effect when the next timer starts. The completion sounds use the Mac's system alert sound.
 
 The illustration in the request informed the interface; it is not embedded in the app.
