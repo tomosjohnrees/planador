@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: AppStore
     @State private var section: AppSection = .plan
     @State private var showingSettings = false
+    @FocusState private var focusedSection: AppSection?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,6 +25,7 @@ struct ContentView: View {
         }
         .background(Theme.sidebar)
         .foregroundStyle(Theme.ink)
+        .onChange(of: section) { _, _ in focusedSection = nil }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .alert("Planador needs attention", isPresented: Binding(
             get: { store.errorMessage != nil },
@@ -48,6 +50,7 @@ struct ContentView: View {
                                     in: RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
+                .focused($focusedSection, equals: item)
                 .accessibilityAddTraits(section == item ? .isSelected : [])
             }
             Spacer()
