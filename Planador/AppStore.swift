@@ -8,16 +8,24 @@ final class AppStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let fileURL: URL
-    private let completionSound: () -> Void
+    private let completionSignal: ((FocusPhase) -> Void)?
+    private let workChime: NSSound?
+    private let breakChime: NSSound?
+    private let managesDockBadge: Bool
     private var maySave = true
     nonisolated(unsafe) private var ticker: Timer?
     private let calendar = Calendar.current
 
-    init(fileURL: URL? = nil, completionSound: @escaping () -> Void = { NSSound.beep() }) {
+    init(fileURL: URL? = nil, completionSignal: ((FocusPhase) -> Void)? = nil) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Planador", isDirectory: true)
         self.fileURL = fileURL ?? support.appendingPathComponent("data.json")
-        self.completionSound = completionSound
+        self.completionSignal = completionSignal
+        self.managesDockBadge = fileURL == nil
+        self.workChime = Bundle.main.url(forResource: "FocusComplete", withExtension: "wav")
+            .flatMap { NSSound(contentsOf: $0, byReference: false) }
+        self.breakChime = Bundle.main.url(forResource: "BreakComplete", withExtension: "wav")
+            .flatMap { NSSound(contentsOf: $0, byReference: false) }
         do {
             let bytes = try Data(contentsOf: self.fileURL)
             data = try JSONDecoder().decode(AppData.self, from: bytes)
@@ -41,6 +49,7 @@ final class AppStore: ObservableObject {
         ticker?.tolerance = 0.1
         if let ticker { RunLoop.main.add(ticker, forMode: .common) }
         updateClock(at: Date(), announce: false)
+        updateDockBadge()
     }
 
     deinit { ticker?.invalidate() }
@@ -180,11 +189,13 @@ final class AppStore: ObservableObject {
     func setBreakMinutes(_ minutes: Int) {
         guard (1...30).contains(minutes) else { return }
         data.timerSettings.breakMinutes = minutes
+        if data.clock.phase == .breakReady { data.clock.durationMinutes = minutes }
         save()
     }
 
     func startTimer() {
         guard data.clock.startedAt == nil else { return }
+        guard data.clock.phase != .breakReady else { return }
         if data.clock.phase == .ready {
             guard selectedTask?.completedAt == nil else { return }
             data.clock.phase = .work
@@ -195,6 +206,26 @@ final class AppStore: ObservableObject {
         }
         now = Date()
         data.clock.startedAt = now
+        updateDockBadge()
+        save()
+    }
+
+    func startBreak(at date: Date = Date()) {
+        guard data.clock.phase == .breakReady, data.clock.startedAt == nil else { return }
+        now = date
+        data.clock.phase = .breakTime
+        data.clock.startedAt = date
+        updateDockBadge()
+        save()
+    }
+
+    func skipBreak() {
+        guard data.clock.phase == .breakReady else { return }
+        data.clock.phase = .ready
+        data.clock.durationMinutes = data.timerSettings.workMinutes
+        data.clock.elapsedBeforeRun = 0
+        data.clock.startedAt = nil
+        updateDockBadge()
         save()
     }
 
@@ -237,22 +268,47 @@ final class AppStore: ObservableObject {
                 if let taskID = data.clock.taskID, end > started {
                     data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
                 }
-                data.clock.phase = .breakTime
+                data.clock.phase = .breakReady
                 data.clock.durationMinutes = data.timerSettings.breakMinutes
                 data.clock.elapsedBeforeRun = 0
-                data.clock.startedAt = end
+                data.clock.startedAt = nil
+                if announce { signalCompletion(.work) }
+            case .breakReady:
+                data.clock.startedAt = nil
             case .breakTime:
                 data.clock.phase = .ready
                 data.clock.durationMinutes = data.timerSettings.workMinutes
                 data.clock.elapsedBeforeRun = 0
                 data.clock.startedAt = nil
+                if announce { signalCompletion(.breakTime) }
             case .ready:
                 data.clock.startedAt = nil
             }
-            if announce && date.timeIntervalSince(end) < 2 { completionSound() }
             changed = true
         }
-        if changed { save() }
+        if changed {
+            updateDockBadge()
+            save()
+        }
+    }
+
+    private func signalCompletion(_ phase: FocusPhase) {
+        if let completionSignal {
+            completionSignal(phase)
+            return
+        }
+        let sound = phase == .work ? workChime : breakChime
+        if sound?.play() != true { NSSound.beep() }
+        NSApp?.requestUserAttention(.criticalRequest)
+    }
+
+    private func updateDockBadge() {
+        guard managesDockBadge else { return }
+        switch data.clock.phase {
+        case .breakReady: NSApp?.dockTile.badgeLabel = "Break"
+        case .ready: NSApp?.dockTile.badgeLabel = "Ready"
+        case .work, .breakTime: NSApp?.dockTile.badgeLabel = nil
+        }
     }
 
     private func save() {

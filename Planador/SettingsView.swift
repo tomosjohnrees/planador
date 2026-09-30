@@ -38,7 +38,7 @@ struct SettingsView: View {
                 }
             }
             .accessibilityLabel("Break length")
-            Text("Changes apply to the next timer.\nA sound plays when each timer ends.")
+            Text("Changes apply to the next timer.\nA chime marks each timer's end.")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)

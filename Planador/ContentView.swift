@@ -25,6 +25,12 @@ struct ContentView: View {
         }
         .background(Theme.sidebar)
         .foregroundStyle(Theme.ink)
+        .onAppear {
+            if store.data.clock.phase == .breakReady { section = .focus }
+        }
+        .onChange(of: store.data.clock.phase) { _, phase in
+            if phase == .breakReady || phase == .ready { section = .focus }
+        }
         .onChange(of: section) { _, _ in focusedSection = nil }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .alert("Planador needs attention", isPresented: Binding(

@@ -53,7 +53,7 @@ final class AppStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testWorkAutomaticallyStartsBreakThenWaitsForNextSession() throws {
+    func testWorkStopsUntilBreakIsStartedAndNextSessionWaits() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -64,25 +64,53 @@ final class AppStoreTests: XCTestCase {
                                                              startedAt: start),
                             timerSettings: TimerSettings(workMinutes: 1, breakMinutes: 1))
         try JSONEncoder().encode(saved).write(to: file)
-        var soundCount = 0
-        let store = AppStore(fileURL: file, completionSound: { soundCount += 1 })
+        var signals: [FocusPhase] = []
+        let store = AppStore(fileURL: file, completionSignal: { signals.append($0) })
 
         store.updateClock(at: start.addingTimeInterval(60), announce: true)
-        XCTAssertEqual(store.data.clock.phase, .breakTime)
-        XCTAssertEqual(store.data.clock.startedAt, start.addingTimeInterval(60))
+        XCTAssertEqual(store.data.clock.phase, .breakReady)
+        XCTAssertNil(store.data.clock.startedAt)
         XCTAssertEqual(store.data.sessions.count, 1)
         XCTAssertEqual(store.data.sessions[0].duration, 60, accuracy: 0.001)
-        XCTAssertEqual(soundCount, 1)
+        XCTAssertEqual(signals, [.work])
 
         store.updateClock(at: start.addingTimeInterval(120), announce: true)
+        XCTAssertEqual(store.data.clock.phase, .breakReady)
+        XCTAssertEqual(signals, [.work])
+
+        let breakStart = start.addingTimeInterval(120)
+        store.startBreak(at: breakStart)
+        XCTAssertEqual(store.data.clock.phase, .breakTime)
+        XCTAssertEqual(store.data.clock.startedAt, breakStart)
+        store.updateClock(at: breakStart.addingTimeInterval(60), announce: true)
         XCTAssertEqual(store.data.clock.phase, .ready)
         XCTAssertNil(store.data.clock.startedAt)
         XCTAssertEqual(store.data.sessions.count, 1)
-        XCTAssertEqual(soundCount, 2)
+        XCTAssertEqual(signals, [.work, .breakTime])
 
         store.startTimer()
         XCTAssertEqual(store.data.clock.phase, .work)
         XCTAssertNotNil(store.data.clock.startedAt)
+    }
+
+    func testCompletionChimesAreBundled() {
+        XCTAssertNotNil(Bundle.main.url(forResource: "FocusComplete", withExtension: "wav"))
+        XCTAssertNotNil(Bundle.main.url(forResource: "BreakComplete", withExtension: "wav"))
+    }
+
+    @MainActor
+    func testBreakCanBeSkippedAfterWorkStops() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let data = AppData(clock: FocusClock(phase: .breakReady, durationMinutes: 5))
+        try JSONEncoder().encode(data).write(to: file)
+        let store = AppStore(fileURL: file)
+
+        store.skipBreak()
+        XCTAssertEqual(store.data.clock.phase, .ready)
+        XCTAssertNil(store.data.clock.startedAt)
     }
 
     @MainActor

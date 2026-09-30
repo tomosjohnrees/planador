@@ -21,6 +21,7 @@ struct FocusSession: Identifiable, Codable {
 
 enum FocusPhase: String, Codable {
     case work
+    case breakReady
     case breakTime
     case ready
 }

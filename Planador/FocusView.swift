@@ -15,11 +15,13 @@ struct FocusView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(title: "Focus", date: store.now)
 
-                if availableTasks.isEmpty && phase != .breakTime {
+                if availableTasks.isEmpty && phase == .work {
                     emptyState
                 } else {
                     if !availableTasks.isEmpty { taskPicker }
-                    if phase == .breakTime || task != nil {
+                    if phase == .breakReady {
+                        workCompletePrompt
+                    } else if phase == .breakTime || phase == .ready || task != nil {
                         timer
                     }
                     if let task {
@@ -37,14 +39,43 @@ struct FocusView: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(phase == .ready ? "Break complete" : "Nothing to focus on yet")
+            Text("Nothing to focus on yet")
                 .font(.system(size: 19, design: .serif))
-            Text(phase == .ready ? "Add a task in Plan, then start your next session." :
-                    "Add a task in Plan to start a focus session.")
+            Text("Add a task in Plan to start a focus session.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.muted)
         }
         .padding(.top, 25)
+    }
+
+    private var workCompletePrompt: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(Theme.green)
+            Text("Time to pause")
+                .font(.system(size: 29, design: .serif))
+            Text("Your focus session is complete. Stop working and take a break.")
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center)
+            Button("Start \(store.data.timerSettings.breakMinutes)-minute break") {
+                store.startBreak()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.green)
+            .controlSize(.large)
+            Button("Skip break") { store.skipBreak() }
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 25)
+        .padding(.vertical, 34)
+        .background(Theme.paleGreen.opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.top, 30)
+        .padding(.bottom, 25)
     }
 
     private var taskPicker: some View {
@@ -95,7 +126,8 @@ struct FocusView: View {
             .padding(.top, 28)
 
             if phase == .ready {
-                Text("Break complete. Start when you're ready.")
+                Text(task == nil ? "Break complete. Choose a task to continue." :
+                        "Break complete. Start when you're ready.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
                 Button("Start next session") { store.startTimer() }
