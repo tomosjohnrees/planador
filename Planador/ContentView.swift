@@ -48,6 +48,7 @@ struct ContentView: View {
                         .frame(height: 39)
                         .background(section == item ? Theme.paleGreen : .clear,
                                     in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
                 .focused($focusedSection, equals: item)
@@ -61,6 +62,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .frame(height: 39)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
