@@ -7,7 +7,8 @@ final class AppStore: ObservableObject {
     @Published var errorMessage: String?
 
     private let fileURL: URL
-    private var ticker: Timer?
+    private var maySave = true
+    nonisolated(unsafe) private var ticker: Timer?
     private let calendar = Calendar.current
 
     init(fileURL: URL? = nil) {
@@ -21,7 +22,15 @@ final class AppStore: ObservableObject {
             data = AppData()
         } catch {
             data = AppData()
-            errorMessage = "Your saved data could not be opened: \(error.localizedDescription)"
+            let backupURL = self.fileURL.deletingPathExtension()
+                .appendingPathExtension("unreadable-\(UUID().uuidString).json")
+            do {
+                try FileManager.default.copyItem(at: self.fileURL, to: backupURL)
+                errorMessage = "Saved data could not be opened. A copy was kept at \(backupURL.path)."
+            } catch {
+                maySave = false
+                errorMessage = "Saved data could not be opened. Changes will not be saved until the data file is repaired."
+            }
         }
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.tick() }
@@ -107,6 +116,22 @@ final class AppStore: ObservableObject {
         save()
     }
 
+    func moveWithinList(_ id: UUID, by offset: Int) {
+        guard offset == -1 || offset == 1,
+              let task = data.tasks.first(where: { $0.id == id }) else { return }
+        let siblings = data.tasks
+            .filter { $0.completedAt == nil && $0.plannedDate == task.plannedDate }
+            .sorted { $0.sortOrder < $1.sortOrder }
+        guard let position = siblings.firstIndex(where: { $0.id == id }),
+              siblings.indices.contains(position + offset),
+              let first = data.tasks.firstIndex(where: { $0.id == id }),
+              let second = data.tasks.firstIndex(where: { $0.id == siblings[position + offset].id }) else { return }
+        let originalOrder = data.tasks[first].sortOrder
+        data.tasks[first].sortOrder = data.tasks[second].sortOrder
+        data.tasks[second].sortOrder = originalOrder
+        save()
+    }
+
     func delete(_ id: UUID) {
         if data.clock.taskID == id { pauseFocus(); data.clock = FocusClock() }
         data.tasks.removeAll { $0.id == id }
@@ -161,6 +186,7 @@ final class AppStore: ObservableObject {
     }
 
     private func save() {
+        guard maySave else { return }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
