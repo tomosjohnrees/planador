@@ -33,7 +33,7 @@ Tasks, notes, timer state, and focus sessions are saved as JSON at `~/Library/Ap
 
 ## Workflow
 
-- **Plan:** Add and edit tasks, move them between Today and Backlog, and reorder them from a task's context menu.
+- **Plan:** Add tasks inline in Today or Backlog, edit them, move them between lists, and reorder them from a task's context menu.
 - **Focus:** Pick one task and start a focus session. At the end, a chime plays, the Dock icon asks for attention, and the timer stops on a clear pause screen. Click **Start break** when you are ready, or skip it. A second chime marks the end of the break; the next focus session waits for you to click Start. You can pause or reset a running timer and keep task notes. Only focus time counts toward the daily total.
 - **Review:** See today's completions, unfinished tasks, and focused time. Expand notes inline on completed tasks, including work finished on earlier days. Send unfinished tasks to tomorrow or back to the backlog.
 

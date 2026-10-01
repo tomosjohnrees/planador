@@ -2,8 +2,7 @@ import SwiftUI
 
 struct PlanView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var addingToToday = true
-    @State private var showingAdd = false
+    @State private var addingToToday: Bool?
     @State private var editingTask: PlanTask?
     let openFocus: () -> Void
 
@@ -21,18 +20,21 @@ struct PlanView: View {
             .padding(.bottom, 44)
             .frame(maxWidth: .infinity)
         }
-        .sheet(isPresented: $showingAdd) {
-            TaskEditor(task: nil, toToday: addingToToday) { title, notes in
-                store.addTask(title: title, notes: notes, toToday: addingToToday)
-            }
-        }
         .sheet(item: $editingTask) { task in
-            TaskEditor(task: task, toToday: task.plannedDate != nil) { title, notes in
-                var changed = task
-                changed.title = title
-                changed.notes = notes
-                store.updateTask(changed)
-            }
+            TaskEditor(
+                task: task,
+                toToday: task.plannedDate != nil,
+                save: { title, notes in
+                    var changed = task
+                    changed.title = title
+                    changed.notes = notes
+                    store.updateTask(changed)
+                    editingTask = nil
+                },
+                cancel: { editingTask = nil }
+            )
+            .padding(28)
+            .frame(width: 430)
         }
     }
 
@@ -41,18 +43,43 @@ struct PlanView: View {
             HStack {
                 Text(title).font(.system(size: 18, weight: .medium))
                 Spacer()
-                Button {
-                    addingToToday = today
-                    showingAdd = true
-                } label: {
-                    Label("Add task", systemImage: "plus")
-                        .font(.system(size: 13))
+                if addingToToday != today {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            addingToToday = today
+                        }
+                    } label: {
+                        Label("Add task", systemImage: "plus")
+                            .font(.system(size: 13))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.bottom, 4)
 
-            if tasks.isEmpty {
+            if addingToToday == today {
+                TaskEditor(
+                    task: nil,
+                    toToday: today,
+                    save: { title, notes in
+                        store.addTask(title: title, notes: notes, toToday: today)
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            addingToToday = nil
+                        }
+                    },
+                    cancel: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            addingToToday = nil
+                        }
+                    }
+                )
+                .padding(18)
+                .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line, lineWidth: 0.7))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if tasks.isEmpty && addingToToday != today {
                 Text(today ? "Choose a task from your backlog, or add one for today." : "Capture tasks here for later.")
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.muted)
@@ -112,26 +139,28 @@ struct PlanView: View {
 }
 
 struct TaskEditor: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var notes: String
     @FocusState private var titleFocused: Bool
     let isEditing: Bool
     let toToday: Bool
     let save: (String, String) -> Void
+    let cancel: () -> Void
 
-    init(task: PlanTask?, toToday: Bool, save: @escaping (String, String) -> Void) {
+    init(task: PlanTask?, toToday: Bool, save: @escaping (String, String) -> Void,
+         cancel: @escaping () -> Void) {
         _title = State(initialValue: task?.title ?? "")
         _notes = State(initialValue: task?.notes ?? "")
         isEditing = task != nil
         self.toToday = toToday
         self.save = save
+        self.cancel = cancel
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: isEditing ? 20 : 13) {
             Text(isEditing ? "Edit task" : "Add to \(toToday ? "Today" : "Backlog")")
-                .font(.system(size: 25, design: .serif))
+                .font(isEditing ? .system(size: 25, design: .serif) : .system(size: 17, weight: .medium))
             TextField("What needs doing?", text: $title)
                 .textFieldStyle(.roundedBorder)
                 .focused($titleFocused)
@@ -139,25 +168,24 @@ struct TaskEditor: View {
             Text("Notes").font(.system(size: 13)).foregroundStyle(Theme.muted)
             TextEditor(text: $notes)
                 .font(.system(size: 13))
-                .frame(height: 110)
+                .frame(height: isEditing ? 110 : 75)
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line))
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel", action: cancel)
                 Button(isEditing ? "Save" : "Add task", action: submit)
                     .buttonStyle(.borderedProminent)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(28)
-        .frame(width: 430)
-        .onAppear { titleFocused = true }
+        .onAppear {
+            DispatchQueue.main.async { titleFocused = true }
+        }
     }
 
     private func submit() {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         save(title.trimmingCharacters(in: .whitespacesAndNewlines), notes)
-        dismiss()
     }
 }
 
