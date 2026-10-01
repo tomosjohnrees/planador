@@ -100,9 +100,7 @@ struct ReviewView: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        expandedTaskID = expandedTaskID == task.id ? nil : task.id
-                    }
+                    expandedTaskID = expandedTaskID == task.id ? nil : task.id
                 } label: {
                     Label(expandedTaskID == task.id ? "Hide notes" : "Notes",
                           systemImage: "note.text")
@@ -136,7 +134,6 @@ struct ReviewView: View {
                 }
                 .padding(.leading, 35)
                 .padding(.bottom, 15)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
             Hairline()
             if !complete {

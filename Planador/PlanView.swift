@@ -45,9 +45,7 @@ struct PlanView: View {
                 Spacer()
                 if addingToToday != today {
                     Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            addingToToday = today
-                        }
+                        addingToToday = today
                     } label: {
                         Label("Add task", systemImage: "plus")
                             .font(.system(size: 13))
@@ -63,20 +61,15 @@ struct PlanView: View {
                     toToday: today,
                     save: { title, notes in
                         store.addTask(title: title, notes: notes, toToday: today)
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            addingToToday = nil
-                        }
+                        addingToToday = nil
                     },
                     cancel: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            addingToToday = nil
-                        }
+                        addingToToday = nil
                     }
                 )
                 .padding(18)
                 .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line, lineWidth: 0.7))
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if tasks.isEmpty && addingToToday != today {
