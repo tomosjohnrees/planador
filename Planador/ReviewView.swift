@@ -3,6 +3,7 @@ import SwiftUI
 struct ReviewView: View {
     @EnvironmentObject private var store: AppStore
     @State private var expandedTaskID: UUID?
+    @State private var taskPendingDeletion: PlanTask?
 
     var body: some View {
         ScrollView {
@@ -48,6 +49,7 @@ struct ReviewView: View {
             .padding(.bottom, 44)
             .frame(maxWidth: .infinity)
         }
+        .taskDeletionAlert(task: $taskPendingDeletion)
     }
 
     private func metric(_ value: String, caption: String) -> some View {
@@ -110,6 +112,16 @@ struct ReviewView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(expandedTaskID == task.id ?
                     "Hide notes for \(task.title)" : "Notes for \(task.title)")
+                Button { taskPendingDeletion = task } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 28, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(task.title)")
+                .help("Delete task")
             }
             .frame(height: 46)
             if expandedTaskID == task.id {

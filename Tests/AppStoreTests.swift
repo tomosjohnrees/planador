@@ -28,6 +28,31 @@ final class AppStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletingCompletedTaskKeepsLoggedFocusTime() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let now = Date()
+        let task = PlanTask(title: "Finished task", notes: "Context",
+                            completedAt: now, sortOrder: 0)
+        let session = FocusSession(taskID: task.id, startedAt: now.addingTimeInterval(-60),
+                                   endedAt: now)
+        try JSONEncoder().encode(AppData(tasks: [task], sessions: [session])).write(to: file)
+        let store = AppStore(fileURL: file)
+        let focusedBefore = store.focusedToday
+
+        store.delete(task.id)
+        XCTAssertTrue(store.completedToday.isEmpty)
+        XCTAssertTrue(store.data.tasks.isEmpty)
+        XCTAssertEqual(store.focusedToday, focusedBefore, accuracy: 0.01)
+
+        let reloaded = AppStore(fileURL: file)
+        XCTAssertTrue(reloaded.data.tasks.isEmpty)
+        XCTAssertEqual(reloaded.focusedToday, focusedBefore, accuracy: 0.01)
+    }
+
+    @MainActor
     func testReorderingOnlyChangesSiblings() throws {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString).appendingPathComponent("data.json")

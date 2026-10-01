@@ -4,6 +4,7 @@ struct PlanView: View {
     @EnvironmentObject private var store: AppStore
     @State private var addingToToday: Bool?
     @State private var editingTask: PlanTask?
+    @State private var taskPendingDeletion: PlanTask?
     let openFocus: () -> Void
 
     var body: some View {
@@ -36,6 +37,7 @@ struct PlanView: View {
             .padding(28)
             .frame(width: 430)
         }
+        .taskDeletionAlert(task: $taskPendingDeletion)
     }
 
     private func taskSection(_ title: String, tasks: [PlanTask], today: Bool) -> some View {
@@ -110,6 +112,16 @@ struct PlanView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                Button { taskPendingDeletion = task } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 28, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(task.title)")
+                .help("Delete task")
             }
             .frame(height: 46)
             .contextMenu {
@@ -124,7 +136,7 @@ struct PlanView: View {
                     Button("Move to today") { store.move(task.id, to: store.today) }
                 }
                 Divider()
-                Button("Delete task", role: .destructive) { store.delete(task.id) }
+                Button("Delete task", role: .destructive) { taskPendingDeletion = task }
             }
             Hairline()
         }

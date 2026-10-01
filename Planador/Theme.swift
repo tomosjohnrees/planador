@@ -50,3 +50,29 @@ struct RoundAction: View {
     }
 }
 
+private struct TaskDeletionAlert: ViewModifier {
+    @EnvironmentObject private var store: AppStore
+    @Binding var task: PlanTask?
+
+    func body(content: Content) -> some View {
+        content.alert("Delete task?", isPresented: Binding(
+            get: { task != nil },
+            set: { if !$0 { task = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { task = nil }
+            Button("Delete task", role: .destructive) {
+                guard let id = task?.id else { return }
+                task = nil
+                store.delete(id)
+            }
+        } message: {
+            Text("This permanently deletes “\(task?.title ?? "this task")” and its notes. Logged focus time stays in your daily total.")
+        }
+    }
+}
+
+extension View {
+    func taskDeletionAlert(task: Binding<PlanTask?>) -> some View {
+        modifier(TaskDeletionAlert(task: task))
+    }
+}
