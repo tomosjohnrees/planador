@@ -1,6 +1,6 @@
 # Planador
 
-A native macOS day planner for software engineers. Keep tasks in a backlog, choose what to do today, focus with a timer and task notes, then review completed work and focused time.
+A native macOS app for managing your day. Keep tasks in a backlog, choose what to do today, focus on one task at a time with a timer and notes, then review what you accomplished.
 
 ## Screenshots
 
