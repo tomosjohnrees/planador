@@ -3,8 +3,11 @@ import SwiftUI
 struct FocusView: View {
     @EnvironmentObject private var store: AppStore
 
-    private var availableTasks: [PlanTask] { store.todayTasks + store.backlogTasks }
+    private var availableTasks: [PlanTask] { store.focusableTasks }
     private var phase: FocusPhase { store.data.clock.phase }
+    private var hasWorkSession: Bool {
+        store.data.clock.startedAt != nil || store.data.clock.elapsedBeforeRun > 0
+    }
     private var task: PlanTask? {
         guard let selected = store.selectedTask, selected.completedAt == nil else { return nil }
         return selected
@@ -15,13 +18,19 @@ struct FocusView: View {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(title: "Focus", date: store.now)
 
-                if availableTasks.isEmpty && phase == .work {
+                if availableTasks.isEmpty && phase == .work && !hasWorkSession {
                     emptyState
                 } else {
                     if !availableTasks.isEmpty { taskPicker }
+                    if availableTasks.isEmpty && phase == .work {
+                        Text("All tasks finished. You can continue your focus session until the timer ends.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.muted)
+                    }
                     if phase == .breakReady {
                         workCompletePrompt
-                    } else if phase == .breakTime || phase == .ready || task != nil {
+                    } else if phase == .breakTime || phase == .ready || task != nil ||
+                                (phase == .work && hasWorkSession) {
                         timer
                     }
                     if let task {

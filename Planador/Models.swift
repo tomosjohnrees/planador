@@ -12,7 +12,7 @@ struct PlanTask: Identifiable, Codable, Equatable {
 
 struct FocusSession: Identifiable, Codable {
     var id: UUID = UUID()
-    var taskID: UUID
+    var taskID: UUID?
     var startedAt: Date
     var endedAt: Date
 

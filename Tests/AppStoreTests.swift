@@ -43,6 +43,74 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.backlogTasks.map(\.title), ["Backlog"])
     }
 
+    @MainActor
+    func testCompletingTasksKeepsTheFocusTimerAndSelectsTheNextTask() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let first = PlanTask(title: "First", plannedDate: Date(), sortOrder: 0)
+        let second = PlanTask(title: "Second", plannedDate: Date(), sortOrder: 1)
+        let start = Date().addingTimeInterval(-10)
+        let data = AppData(tasks: [first, second],
+                           clock: FocusClock(taskID: first.id, durationMinutes: 1,
+                                             startedAt: start))
+        try JSONEncoder().encode(data).write(to: file)
+        let store = AppStore(fileURL: file)
+        let remainingBefore = store.data.clock.remaining(at: Date())
+
+        store.complete(first.id)
+        XCTAssertEqual(store.selectedTask?.id, second.id)
+        XCTAssertEqual(store.data.clock.phase, .work)
+        XCTAssertNotNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.clock.remaining(at: Date()), remainingBefore, accuracy: 1)
+        XCTAssertEqual(store.data.sessions.map(\.taskID), [first.id])
+
+        store.complete(second.id)
+        XCTAssertNil(store.selectedTask)
+        XCTAssertNil(store.data.clock.taskID)
+        XCTAssertNotNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.clock.phase, .work)
+
+        store.pauseTimer()
+        XCTAssertNil(store.data.clock.startedAt)
+        store.startTimer()
+        XCTAssertNotNil(store.data.clock.startedAt)
+
+        let reloaded = AppStore(fileURL: file)
+        XCTAssertNil(reloaded.data.clock.taskID)
+        XCTAssertNotNil(reloaded.data.clock.startedAt)
+
+        let currentStart = try XCTUnwrap(store.data.clock.startedAt)
+        let remaining = store.data.clock.remaining(at: currentStart)
+        store.updateClock(at: currentStart.addingTimeInterval(remaining))
+        XCTAssertEqual(store.data.clock.phase, .breakReady)
+        XCTAssertEqual(store.data.sessions.last?.taskID, nil)
+        XCTAssertEqual(store.data.sessions.reduce(0) { $0 + $1.duration }, 60, accuracy: 1)
+    }
+
+    @MainActor
+    func testChangingTasksManuallyPreservesTheFocusTimer() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let first = PlanTask(title: "First", plannedDate: Date(), sortOrder: 0)
+        let second = PlanTask(title: "Second", plannedDate: Date(), sortOrder: 1)
+        let data = AppData(tasks: [first, second],
+                           clock: FocusClock(taskID: first.id, durationMinutes: 25,
+                                             startedAt: Date().addingTimeInterval(-10)))
+        try JSONEncoder().encode(data).write(to: file)
+        let store = AppStore(fileURL: file)
+        let remainingBefore = store.data.clock.remaining(at: Date())
+
+        store.selectForFocus(second.id)
+        XCTAssertEqual(store.selectedTask?.id, second.id)
+        XCTAssertNotNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.clock.remaining(at: Date()), remainingBefore, accuracy: 1)
+        XCTAssertEqual(store.data.sessions.map(\.taskID), [first.id])
+    }
+
     func testFocusClockCapsElapsedTime() {
         let start = Date(timeIntervalSince1970: 1000)
         let clock = FocusClock(taskID: UUID(), durationMinutes: 25,

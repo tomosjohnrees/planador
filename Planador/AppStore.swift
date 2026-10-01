@@ -67,6 +67,8 @@ final class AppStore: ObservableObject {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    var focusableTasks: [PlanTask] { todayTasks + backlogTasks }
+
     var completedToday: [PlanTask] {
         data.tasks.filter { $0.completedAt.map { calendar.isDate($0, inSameDayAs: today) } == true }
             .sorted { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
@@ -115,13 +117,9 @@ final class AppStore: ObservableObject {
     }
 
     func complete(_ id: UUID) {
-        guard let index = data.tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = data.tasks.firstIndex(where: { $0.id == id && $0.completedAt == nil }) else { return }
         if data.clock.taskID == id {
-            if data.clock.phase == .work {
-                pauseTimer()
-                data.clock.elapsedBeforeRun = 0
-            }
-            data.clock.taskID = nil
+            changeFocusedTask(to: nextTaskID(after: id), at: Date())
         }
         data.tasks[index].completedAt = now
         save()
@@ -159,11 +157,7 @@ final class AppStore: ObservableObject {
 
     func delete(_ id: UUID) {
         if data.clock.taskID == id {
-            if data.clock.phase == .work {
-                pauseTimer()
-                data.clock.elapsedBeforeRun = 0
-            }
-            data.clock.taskID = nil
+            changeFocusedTask(to: nextTaskID(after: id), at: Date())
         }
         data.tasks.removeAll { $0.id == id }
         save()
@@ -172,13 +166,32 @@ final class AppStore: ObservableObject {
     func selectForFocus(_ id: UUID) {
         guard data.tasks.contains(where: { $0.id == id && $0.completedAt == nil }) else { return }
         guard data.clock.taskID != id else { return }
-        if data.clock.phase == .work {
-            pauseTimer()
-            data.clock = FocusClock(taskID: id, durationMinutes: data.timerSettings.workMinutes)
-        } else {
-            data.clock.taskID = id
-        }
+        changeFocusedTask(to: id, at: Date())
         save()
+    }
+
+    private func nextTaskID(after id: UUID) -> UUID? {
+        let tasks = focusableTasks
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else {
+            return tasks.first?.id
+        }
+        return tasks.dropFirst(index + 1).first?.id
+            ?? tasks.first(where: { $0.id != id })?.id
+    }
+
+    private func changeFocusedTask(to id: UUID?, at date: Date) {
+        updateClock(at: date, announce: true)
+        guard data.clock.taskID != id else { return }
+        if data.clock.phase == .work, let started = data.clock.startedAt {
+            let end = min(date, started.addingTimeInterval(data.clock.remaining(at: started)))
+            if end > started {
+                data.sessions.append(FocusSession(taskID: data.clock.taskID,
+                                                  startedAt: started, endedAt: end))
+                data.clock.elapsedBeforeRun += end.timeIntervalSince(started)
+            }
+            data.clock.startedAt = date
+        }
+        data.clock.taskID = id
     }
 
     func setWorkMinutes(_ minutes: Int) {
@@ -207,7 +220,7 @@ final class AppStore: ObservableObject {
             data.clock.durationMinutes = data.timerSettings.workMinutes
             data.clock.elapsedBeforeRun = 0
         } else if data.clock.phase == .work {
-            guard selectedTask?.completedAt == nil else { return }
+            guard selectedTask?.completedAt == nil || data.clock.elapsedBeforeRun > 0 else { return }
         }
         now = Date()
         data.clock.startedAt = now
@@ -241,8 +254,9 @@ final class AppStore: ObservableObject {
         guard previousPhase == data.clock.phase, let started = data.clock.startedAt else { return }
         let end = min(date, started.addingTimeInterval(data.clock.remaining(at: started)))
         if end > started {
-            if data.clock.phase == .work, let taskID = data.clock.taskID {
-                data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
+            if data.clock.phase == .work {
+                data.sessions.append(FocusSession(taskID: data.clock.taskID,
+                                                  startedAt: started, endedAt: end))
             }
             data.clock.elapsedBeforeRun += end.timeIntervalSince(started)
         }
@@ -270,8 +284,9 @@ final class AppStore: ObservableObject {
             let end = started.addingTimeInterval(data.clock.remaining(at: started))
             switch data.clock.phase {
             case .work:
-                if let taskID = data.clock.taskID, end > started {
-                    data.sessions.append(FocusSession(taskID: taskID, startedAt: started, endedAt: end))
+                if end > started {
+                    data.sessions.append(FocusSession(taskID: data.clock.taskID,
+                                                      startedAt: started, endedAt: end))
                 }
                 data.clock.phase = .breakReady
                 data.clock.durationMinutes = data.timerSettings.breakMinutes
