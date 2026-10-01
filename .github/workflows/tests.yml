@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS tests
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run tests
+        run: |
+          xcodebuild -project Planador.xcodeproj \
+            -scheme Planador \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/PlanadorDerivedData" \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
