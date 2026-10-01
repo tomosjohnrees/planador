@@ -2,6 +2,22 @@
 
 A native macOS day planner for software engineers. Keep tasks in a backlog, choose what to do today, focus with a timer and task notes, then review completed work and focused time.
 
+## Screenshots
+
+These screenshots show the app with sample tasks.
+
+### Plan
+
+![Plan view with today's tasks and a backlog](docs/screenshots/plan.jpg)
+
+### Focus
+
+![Focus timer with the current task and its notes](docs/screenshots/focus.jpg)
+
+### Review
+
+![Daily review with completed tasks, focused time, and inline notes](docs/screenshots/review.jpg)
+
 ## Requirements
 
 - macOS 14 or later
