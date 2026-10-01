@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ReviewView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var notesTask: PlanTask?
+    @State private var expandedTaskID: UUID?
 
     var body: some View {
         ScrollView {
@@ -47,9 +47,6 @@ struct ReviewView: View {
             .padding(.top, 49)
             .padding(.bottom, 44)
             .frame(maxWidth: .infinity)
-        }
-        .sheet(item: $notesTask) { task in
-            TaskNotesSheet(task: task)
         }
     }
 
@@ -102,15 +99,45 @@ struct ReviewView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                 }
-                Button { notesTask = task } label: {
-                    Label("Notes", systemImage: "note.text")
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        expandedTaskID = expandedTaskID == task.id ? nil : task.id
+                    }
+                } label: {
+                    Label(expandedTaskID == task.id ? "Hide notes" : "Notes",
+                          systemImage: "note.text")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Notes for \(task.title)")
+                .accessibilityLabel(expandedTaskID == task.id ?
+                    "Hide notes for \(task.title)" : "Notes for \(task.title)")
             }
             .frame(height: 46)
+            if expandedTaskID == task.id {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Notes")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
+                    TextEditor(text: Binding(
+                        get: { store.data.tasks.first(where: { $0.id == task.id })?.notes ?? "" },
+                        set: { store.updateNotes($0, for: task.id) }
+                    ))
+                    .font(.system(size: 13))
+                    .scrollContentBackground(.hidden)
+                    .padding(10)
+                    .frame(height: 120)
+                    .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 0.5))
+                    .accessibilityLabel("Notes for \(task.title)")
+                    Text("Changes save automatically.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.muted)
+                }
+                .padding(.leading, 35)
+                .padding(.bottom, 15)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             Hairline()
             if !complete {
                 HStack {
@@ -132,48 +159,5 @@ struct ReviewView: View {
                 .padding(.bottom, 16)
             }
         }
-    }
-}
-
-private struct TaskNotesSheet: View {
-    @EnvironmentObject private var store: AppStore
-    @Environment(\.dismiss) private var dismiss
-    let task: PlanTask
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(task.title)
-                        .font(.system(size: 25, design: .serif))
-                        .lineLimit(2)
-                    if let completedAt = task.completedAt {
-                        Text("Completed \(completedAt.formatted(date: .abbreviated, time: .omitted))")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.muted)
-                    }
-                }
-                Spacer(minLength: 16)
-                Button("Done") { dismiss() }
-            }
-            Text("Notes")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.muted)
-            TextEditor(text: Binding(
-                get: { store.data.tasks.first(where: { $0.id == task.id })?.notes ?? "" },
-                set: { store.updateNotes($0, for: task.id) }
-            ))
-            .font(.system(size: 13))
-            .scrollContentBackground(.hidden)
-            .padding(10)
-            .background(Theme.sidebar, in: RoundedRectangle(cornerRadius: 9))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, lineWidth: 0.5))
-            .accessibilityLabel("Notes for \(task.title)")
-            Text("Changes save automatically.")
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.muted)
-        }
-        .padding(28)
-        .frame(width: 520, height: 370)
     }
 }
