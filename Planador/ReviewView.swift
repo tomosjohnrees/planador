@@ -12,7 +12,7 @@ struct ReviewView: View {
                 HStack(spacing: 0) {
                     metric("\(store.completedToday.count)", caption: "Completed today")
                     Hairline().frame(width: 1, height: 60)
-                    metric("\(store.todayTasks.count)", caption: "Unfinished today")
+                    metric("\(store.todayTasks.count + store.carriedOverTasks.count)", caption: "Unfinished")
                     Hairline().frame(width: 1, height: 60)
                     metric(DurationLabel.summary(store.focusedToday), caption: "Total focused time")
                 }
@@ -29,11 +29,16 @@ struct ReviewView: View {
                 Hairline().padding(.top, 30)
                 sectionTitle("Unfinished today")
                 if store.todayTasks.isEmpty {
-                    empty("You’re all caught up for today.")
+                    empty(store.carriedOverTasks.isEmpty ? "You’re all caught up for today." : "No unfinished tasks scheduled for today. Earlier tasks are below.")
                 } else {
                     ForEach(store.todayTasks) { task in
                         taskRow(task, complete: false)
                     }
+                }
+                if !store.carriedOverTasks.isEmpty {
+                    Hairline().padding(.top, 30)
+                    sectionTitle("Carried over")
+                    ForEach(store.carriedOverTasks) { TaskRow(task: $0, showDate: true, allowsDrop: false) }
                 }
                 if !store.completedEarlier.isEmpty {
                     Hairline().padding(.top, 30)

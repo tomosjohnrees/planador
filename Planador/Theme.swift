@@ -66,7 +66,7 @@ private struct TaskDeletionAlert: ViewModifier {
                 store.delete(id)
             }
         } message: {
-            Text("This permanently deletes “\(task?.title ?? "this task")” and its notes. Logged focus time stays in your daily total.")
+            Text("This deletes “\(task?.title ?? "this task")” and its notes. You can undo this during the current app session. Logged focus time is kept.")
         }
     }
 }

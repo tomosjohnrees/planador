@@ -249,3 +249,314 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.data.timerSettings.breakMinutes, 5)
     }
 }
+
+final class PlanningAndBackupTests: XCTestCase {
+    private var directory: URL!
+    private var file: URL { directory.appendingPathComponent("data.json") }
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try FileManager.default.removeItem(at: directory)
+    }
+
+    private func write(_ data: AppData) throws { try JSONEncoder().encode(data).write(to: file) }
+
+    @MainActor
+    func testEveryIncompleteTaskRemainsVisibleAcrossMidnight() throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: today))
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: today))
+        let later = try XCTUnwrap(calendar.date(byAdding: .day, value: 3, to: today))
+        let tasks = [PlanTask(title: "Overdue", plannedDate: yesterday, sortOrder: 0),
+                     PlanTask(title: "Today", plannedDate: today, sortOrder: 1),
+                     PlanTask(title: "Tomorrow", plannedDate: tomorrow, sortOrder: 2),
+                     PlanTask(title: "Later", plannedDate: later, sortOrder: 3),
+                     PlanTask(title: "Backlog", sortOrder: 4)]
+        try write(AppData(tasks: tasks))
+        let store = AppStore(fileURL: file)
+        store.updateClock(at: today.addingTimeInterval(12 * 3600))
+        XCTAssertEqual(store.carriedOverTasks.map(\.title), ["Overdue"])
+        XCTAssertEqual(store.tomorrowTasks.map(\.title), ["Tomorrow"])
+        XCTAssertEqual(store.upcomingDates, [later])
+        store.updateClock(at: tomorrow)
+        XCTAssertEqual(store.carriedOverTasks.map(\.title), ["Overdue", "Today"])
+        XCTAssertEqual(store.todayTasks.map(\.title), ["Tomorrow"])
+        let visible = store.carriedOverTasks + store.todayTasks + store.tomorrowTasks + store.backlogTasks +
+            store.upcomingDates.flatMap { store.tasks(on: $0) }
+        XCTAssertEqual(Set(visible.map(\.id)), Set(tasks.map(\.id)))
+        XCTAssertEqual(visible.count, tasks.count)
+        XCTAssertTrue(store.focusableTasks.contains(where: { $0.title == "Overdue" }))
+    }
+
+    @MainActor
+    func testDatesAreGroupedByCalendarDayAndDropsReorderOnlyTheirDestination() throws {
+        let today = Calendar.current.startOfDay(for: Date())
+        let first = PlanTask(title: "First", plannedDate: today.addingTimeInterval(3600), sortOrder: 5)
+        let second = PlanTask(title: "Second", plannedDate: today.addingTimeInterval(7200), sortOrder: 10)
+        let backlog = PlanTask(title: "Backlog", sortOrder: 15)
+        let other = PlanTask(title: "Other day", plannedDate: today.addingTimeInterval(3 * 86400), sortOrder: 20)
+        try write(AppData(tasks: [first, second, backlog, other]))
+        let store = AppStore(fileURL: file)
+        XCTAssertEqual(store.todayTasks.count, 2)
+        store.moveWithinList(second.id, by: -1)
+        XCTAssertEqual(store.todayTasks.map(\.id), [second.id, first.id])
+        XCTAssertTrue(store.acceptTaskDrop(["planador-task:\(backlog.id)"], on: today, before: first.id))
+        XCTAssertEqual(store.todayTasks.map(\.id), [second.id, backlog.id, first.id])
+        XCTAssertEqual(store.data.tasks.first(where: { $0.id == other.id }), other)
+        store.move(backlog.id, to: store.tomorrow.addingTimeInterval(3600))
+        XCTAssertEqual(store.tomorrowTasks.map(\.id), [backlog.id])
+        XCTAssertEqual(store.tomorrowTasks.first?.plannedDate, store.tomorrow)
+        store.move(backlog.id, to: nil)
+        XCTAssertEqual(store.backlogTasks.map(\.id), [backlog.id])
+    }
+
+    @MainActor
+    func testInvalidDropsCannotChangeTasks() throws {
+        let task = PlanTask(title: "Active", sortOrder: 0)
+        let complete = PlanTask(title: "Done", completedAt: Date(), sortOrder: 1)
+        try write(AppData(tasks: [task, complete]))
+        let store = AppStore(fileURL: file)
+        XCTAssertFalse(store.acceptTaskDrop([task.id.uuidString], on: store.today))
+        XCTAssertFalse(store.acceptTaskDrop(["planador-task:\(UUID())"], on: store.today))
+        XCTAssertFalse(store.acceptTaskDrop(["planador-task:\(complete.id)"], on: store.today))
+        XCTAssertFalse(store.acceptTaskDrop(["planador-task:\(task.id)", "planador-task:\(task.id)"], on: store.today))
+        XCTAssertFalse(store.placeTask(task.id, on: store.today, before: UUID()))
+        XCTAssertFalse(store.placeTask(task.id, on: nil, before: task.id))
+        XCTAssertEqual(store.data.tasks, [task, complete])
+    }
+
+    @MainActor
+    func testMovingTheFocusedTaskToTheFuturePreservesTimerAndLoggedTime() throws {
+        let now = Date()
+        let first = PlanTask(title: "First", plannedDate: now, sortOrder: 0)
+        let second = PlanTask(title: "Second", plannedDate: now, sortOrder: 1)
+        try write(AppData(tasks: [first, second],
+                          clock: FocusClock(taskID: first.id, startedAt: now.addingTimeInterval(-10))))
+        let store = AppStore(fileURL: file)
+        let remaining = store.data.clock.remaining(at: Date())
+        store.move(first.id, to: store.tomorrow)
+        XCTAssertEqual(store.selectedTask?.id, second.id)
+        XCTAssertNotNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.clock.remaining(at: Date()), remaining, accuracy: 1)
+        XCTAssertEqual(store.data.sessions.map(\.taskID), [first.id])
+        XCTAssertEqual(store.tomorrowTasks.map(\.id), [first.id])
+    }
+
+    @MainActor
+    func testUndoRedoTaskChangesPersistsWithoutRewindingTheTimer() throws {
+        let now = Date()
+        let task = PlanTask(title: "Original", notes: "Keep me", plannedDate: now, sortOrder: 0)
+        let session = FocusSession(taskID: task.id, startedAt: now.addingTimeInterval(-120), endedAt: now.addingTimeInterval(-60))
+        try write(AppData(tasks: [task], sessions: [session], clock: FocusClock(taskID: task.id, startedAt: now.addingTimeInterval(-10))))
+        let store = AppStore(fileURL: file)
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        store.undoManager = manager
+        manager.beginUndoGrouping()
+        store.renameTask(task.id, to: "Renamed")
+        manager.endUndoGrouping()
+        manager.undo()
+        XCTAssertEqual(store.data.tasks.first?.title, "Original")
+        manager.redo()
+        XCTAssertEqual(store.data.tasks.first?.title, "Renamed")
+        manager.beginUndoGrouping()
+        store.delete(task.id)
+        manager.endUndoGrouping()
+        let sessionIDs = store.data.sessions.map(\.id)
+        let remaining = store.data.clock.remaining(at: Date())
+        manager.undo()
+        XCTAssertEqual(store.data.tasks.first?.notes, "Keep me")
+        XCTAssertEqual(store.data.sessions.map(\.id), sessionIDs)
+        XCTAssertEqual(store.data.clock.remaining(at: Date()), remaining, accuracy: 1)
+        XCTAssertNotNil(store.data.clock.startedAt)
+        XCTAssertEqual(AppStore(fileURL: file).data.tasks.first?.title, "Renamed")
+        manager.redo()
+        XCTAssertTrue(store.data.tasks.isEmpty)
+        XCTAssertEqual(store.data.sessions.map(\.id), sessionIDs)
+    }
+
+    @MainActor
+    func testUndoSchedulingCompletionNotesAndAdding() throws {
+        let store = AppStore(fileURL: file)
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        store.undoManager = manager
+        func action(_ change: () -> Void) { manager.beginUndoGrouping(); change(); manager.endUndoGrouping() }
+        action { store.addTask(title: "Task", notes: "Original", toToday: true) }
+        let task = try XCTUnwrap(store.todayTasks.first)
+        action { store.updateNotes("Changed", for: task.id) }
+        manager.undo()
+        XCTAssertEqual(store.todayTasks.first?.notes, "Original")
+        action { store.move(task.id, to: store.tomorrow) }
+        manager.undo()
+        XCTAssertEqual(store.todayTasks.map(\.id), [task.id])
+        action { store.complete(task.id) }
+        manager.undo()
+        XCTAssertEqual(store.todayTasks.map(\.id), [task.id])
+        manager.undo()
+        XCTAssertTrue(store.data.tasks.isEmpty)
+    }
+
+    @MainActor
+    func testSearchIncludesNotesAndEveryTaskStatus() throws {
+        let now = Date()
+        let later = now.addingTimeInterval(7 * 86400)
+        let tasks = [PlanTask(title: "Café launch", notes: "Billing fixes", sortOrder: 0),
+                     PlanTask(title: "Future", notes: "cafe BILLING", plannedDate: later, sortOrder: 1),
+                     PlanTask(title: "Completed", notes: "Cafe billing", completedAt: now, sortOrder: 2),
+                     PlanTask(title: "Unrelated", sortOrder: 3)]
+        try write(AppData(tasks: tasks))
+        let store = AppStore(fileURL: file)
+        XCTAssertEqual(store.searchTasks("  cafe  billing \n").map(\.id), Array(tasks.prefix(3)).map(\.id))
+        XCTAssertTrue(store.searchTasks(" ").isEmpty)
+        XCTAssertTrue(store.searchTasks("missing").isEmpty)
+        XCTAssertEqual(store.searchTasks("future").map(\.id), [tasks[1].id])
+    }
+
+    @MainActor
+    func testBackupCapturesRunningTimeWithoutChangingTheLiveTimer() throws {
+        let start = Date().addingTimeInterval(60)
+        let task = PlanTask(title: "Working", plannedDate: Date(), sortOrder: 0)
+        let clock = FocusClock(taskID: task.id, elapsedBeforeRun: 30, startedAt: start)
+        let logged = FocusSession(taskID: task.id, startedAt: start.addingTimeInterval(-30), endedAt: start)
+        try write(AppData(tasks: [task], sessions: [logged], clock: clock))
+        let store = AppStore(fileURL: file)
+        let bytes = try store.backupData(at: start.addingTimeInterval(15))
+        let backup = try store.readBackup(bytes)
+        XCTAssertNil(backup.clock.startedAt)
+        XCTAssertEqual(backup.clock.elapsedBeforeRun, 45)
+        XCTAssertEqual(backup.sessions.reduce(0) { $0 + $1.duration }, 45)
+        XCTAssertEqual(store.data.clock.startedAt, start)
+        XCTAssertEqual(store.data.sessions.count, 1)
+        XCTAssertEqual(store.data.clock.elapsedBeforeRun, 30)
+        let recovery = try store.restoreBackup(backup)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recovery.path))
+        XCTAssertNil(store.data.clock.startedAt)
+        XCTAssertEqual(store.data.sessions.reduce(0) { $0 + $1.duration }, 45)
+    }
+
+    @MainActor
+    func testBackupAtTimerEndDoesNotDoubleCountAndPreparesTheBreak() throws {
+        let start = Date().addingTimeInterval(60)
+        let clock = FocusClock(durationMinutes: 1, startedAt: start)
+        try write(AppData(clock: clock))
+        let store = AppStore(fileURL: file)
+        let backup = try store.readBackup(store.backupData(at: start.addingTimeInterval(120)))
+        XCTAssertEqual(backup.clock.phase, .breakReady)
+        XCTAssertNil(backup.clock.startedAt)
+        XCTAssertEqual(backup.clock.elapsedBeforeRun, 0)
+        XCTAssertEqual(backup.sessions.reduce(0) { $0 + $1.duration }, 60)
+    }
+
+    @MainActor
+    func testRestoreKeepsRecoveryCopyAndSettingsAndClearsUndo() throws {
+        let original = PlanTask(title: "Original", notes: "Original notes", sortOrder: 0)
+        try write(AppData(tasks: [original], notificationsEnabled: false))
+        let store = AppStore(fileURL: file)
+        let manager = UndoManager()
+        store.undoManager = manager
+        manager.beginUndoGrouping()
+        store.renameTask(original.id, to: "Before restore")
+        manager.endUndoGrouping()
+        let replacement = PlanTask(title: "Imported", notes: "Imported notes", sortOrder: 0)
+        let recoveryURL = try store.restoreBackup(AppData(tasks: [replacement], notificationsEnabled: true))
+        XCTAssertEqual(store.data.tasks, [replacement])
+        XCTAssertFalse(store.data.notificationsEnabled)
+        XCTAssertFalse(manager.canUndo)
+        XCTAssertFalse(manager.canRedo)
+        let recovery = try store.readBackup(Data(contentsOf: recoveryURL))
+        XCTAssertEqual(recovery.tasks.first?.title, "Before restore")
+        XCTAssertEqual(recovery.tasks.first?.notes, "Original notes")
+        XCTAssertEqual(AppStore(fileURL: file).data.tasks, [replacement])
+    }
+
+    @MainActor
+    func testInvalidBackupCannotReplaceCurrentData() throws {
+        let task = PlanTask(title: "Keep me", sortOrder: 0)
+        try write(AppData(tasks: [task]))
+        let store = AppStore(fileURL: file)
+        let diskBefore = try Data(contentsOf: file)
+        XCTAssertThrowsError(try store.readBackup(Data("not json".utf8)))
+        let duplicate = AppData(tasks: [task, task])
+        XCTAssertThrowsError(try store.readBackup(JSONEncoder().encode(duplicate)))
+        XCTAssertThrowsError(try store.restoreBackup(duplicate))
+        XCTAssertThrowsError(try store.restoreBackup(AppData(timerSettings: TimerSettings(workMinutes: 999, breakMinutes: 5))))
+        XCTAssertThrowsError(try store.restoreBackup(AppData(sessions: [FocusSession(startedAt: Date(), endedAt: .distantPast)])))
+        XCTAssertEqual(store.data.tasks, [task])
+        XCTAssertEqual(try Data(contentsOf: file), diskBefore)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["data.json"])
+    }
+
+    @MainActor
+    func testRestoreWriteFailureKeepsMemoryIntact() throws {
+        let task = PlanTask(title: "Original", sortOrder: 0)
+        try write(AppData(tasks: [task]))
+        let store = AppStore(fileURL: file)
+        try FileManager.default.removeItem(at: directory)
+        try Data("blocking file".utf8).write(to: directory)
+        XCTAssertThrowsError(try store.restoreBackup(AppData()))
+        XCTAssertEqual(store.data.tasks, [task])
+    }
+
+    @MainActor
+    func testFocusingFutureTaskMovesItToTodayAndEmptyTimerCannotStart() throws {
+        let store = AppStore(fileURL: file)
+        XCTAssertFalse(store.canStartTimer)
+        store.startTimer()
+        XCTAssertNil(store.data.clock.startedAt)
+        store.addTask(title: "Future", notes: "", plannedDate: store.dayAfterTomorrow)
+        let task = try XCTUnwrap(store.data.tasks.first)
+        store.focusTask(task.id)
+        XCTAssertEqual(store.todayTasks.map(\.id), [task.id])
+        XCTAssertEqual(store.section, .focus)
+        XCTAssertTrue(store.canStartTimer)
+        store.toggleTimer()
+        XCTAssertNotNil(store.data.clock.startedAt)
+        store.toggleTimer()
+        XCTAssertNil(store.data.clock.startedAt)
+    }
+
+    func testMalformedTimerDurationsAndElapsedTimeAreRejected() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(FocusClock())) as? [String: Any])
+        for duration in [0, -1, Int.max] {
+            object["durationMinutes"] = duration
+            XCTAssertThrowsError(try JSONDecoder().decode(FocusClock.self, from: JSONSerialization.data(withJSONObject: object)))
+        }
+        object["durationMinutes"] = 25
+        for elapsed in [-1, 1501] {
+            object["elapsedBeforeRun"] = elapsed
+            XCTAssertThrowsError(try JSONDecoder().decode(FocusClock.self, from: JSONSerialization.data(withJSONObject: object)))
+        }
+    }
+
+    @MainActor
+    func testBackupFilenameUsesTheLocalCalendarDay() throws {
+        let store = AppStore(fileURL: file)
+        let date = Calendar.current.startOfDay(for: Date())
+        store.updateClock(at: date)
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let expected = String(format: "Planador-%04d-%02d-%02d", components.year!, components.month!, components.day!)
+        XCTAssertEqual(store.backupFilename, expected)
+    }
+}
+
+final class TaskDragTests: XCTestCase {
+    func testNativeDragExportsOnlyTheTextPayloadAndLoadsLosslessly() async throws {
+        let id = UUID()
+        let provider = TaskDrag.itemProvider(for: id)
+        XCTAssertEqual(provider.registeredTypeIdentifiers, [TaskDrag.typeIdentifier])
+        let bytes: Data = try await withCheckedThrowingContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: TaskDrag.typeIdentifier) { bytes, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let bytes { continuation.resume(returning: bytes) }
+                else { continuation.resume(throwing: CocoaError(.fileReadCorruptFile)) }
+            }
+        }
+        XCTAssertEqual(String(data: bytes, encoding: .utf8), "planador-task:\(id.uuidString)")
+    }
+}

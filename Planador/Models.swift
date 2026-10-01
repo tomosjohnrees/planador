@@ -55,8 +55,16 @@ struct FocusClock: Codable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         taskID = try values.decodeIfPresent(UUID.self, forKey: .taskID)
         phase = try values.decodeIfPresent(FocusPhase.self, forKey: .phase) ?? .work
-        durationMinutes = max(1, try values.decode(Int.self, forKey: .durationMinutes))
-        elapsedBeforeRun = max(0, try values.decode(TimeInterval.self, forKey: .elapsedBeforeRun))
+        durationMinutes = try values.decode(Int.self, forKey: .durationMinutes)
+        guard (1...120).contains(durationMinutes) else {
+            throw DecodingError.dataCorruptedError(forKey: .durationMinutes, in: values,
+                                                  debugDescription: "Timer duration must be between 1 and 120 minutes.")
+        }
+        elapsedBeforeRun = try values.decode(TimeInterval.self, forKey: .elapsedBeforeRun)
+        guard elapsedBeforeRun.isFinite, (0...Double(durationMinutes * 60)).contains(elapsedBeforeRun) else {
+            throw DecodingError.dataCorruptedError(forKey: .elapsedBeforeRun, in: values,
+                                                  debugDescription: "Elapsed time is outside the timer's duration.")
+        }
         startedAt = try values.decodeIfPresent(Date.self, forKey: .startedAt)
     }
 
@@ -76,17 +84,20 @@ struct AppData: Codable {
     var sessions: [FocusSession]
     var clock: FocusClock
     var timerSettings: TimerSettings
+    var notificationsEnabled: Bool
 
     init(tasks: [PlanTask] = [], sessions: [FocusSession] = [],
-         clock: FocusClock = FocusClock(), timerSettings: TimerSettings = TimerSettings()) {
+         clock: FocusClock = FocusClock(), timerSettings: TimerSettings = TimerSettings(),
+         notificationsEnabled: Bool = false) {
         self.tasks = tasks
         self.sessions = sessions
         self.clock = clock
         self.timerSettings = timerSettings
+        self.notificationsEnabled = notificationsEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tasks, sessions, clock, timerSettings
+        case tasks, sessions, clock, timerSettings, notificationsEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -96,6 +107,7 @@ struct AppData: Codable {
         clock = try values.decode(FocusClock.self, forKey: .clock)
         timerSettings = try values.decodeIfPresent(TimerSettings.self, forKey: .timerSettings)
             ?? TimerSettings(workMinutes: clock.durationMinutes, breakMinutes: 5)
+        notificationsEnabled = try values.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? false
     }
 }
 
@@ -103,6 +115,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case plan = "Plan"
     case focus = "Focus"
     case review = "Review"
+    case search = "Search"
 
     var id: String { rawValue }
 
@@ -111,6 +124,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .plan: "calendar"
         case .focus: "circle.dotted.circle"
         case .review: "chart.bar"
+        case .search: "magnifyingglass"
         }
     }
 }
