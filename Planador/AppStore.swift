@@ -72,6 +72,11 @@ final class AppStore: ObservableObject {
             .sorted { ($0.completedAt ?? .distantPast) < ($1.completedAt ?? .distantPast) }
     }
 
+    var completedEarlier: [PlanTask] {
+        data.tasks.filter { $0.completedAt.map { $0 < today } == true }
+            .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
+    }
+
     var selectedTask: PlanTask? { data.tasks.first { $0.id == data.clock.taskID } }
 
     var focusedToday: TimeInterval {

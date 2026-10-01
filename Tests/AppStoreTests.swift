@@ -114,6 +114,24 @@ final class AppStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testNotesRemainAvailableOnEarlierCompletedTasks() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent("data.json")
+        let yesterday = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: -1, to: Date()))
+        let task = PlanTask(title: "Finished task", notes: "Original context",
+                            completedAt: yesterday, sortOrder: 0)
+        try JSONEncoder().encode(AppData(tasks: [task])).write(to: file)
+
+        let store = AppStore(fileURL: file)
+        XCTAssertEqual(store.completedEarlier.map(\.id), [task.id])
+        store.updateNotes("Revised context", for: task.id)
+        let reloaded = AppStore(fileURL: file)
+        XCTAssertEqual(reloaded.completedEarlier.first?.notes, "Revised context")
+    }
+
+    @MainActor
     func testLegacyDataKeepsTasksAndFocusLength() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
